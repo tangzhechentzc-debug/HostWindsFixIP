@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---- 本项目补充 ----
+# 凭证 —— 绝不入库
+*.apikey
+*.cookie
+*.key
+.env
+config.env
+
+# 运行时产物
+*.log
+ips.txt
+ips.txt.bak
+__pycache__/
+*.pyc

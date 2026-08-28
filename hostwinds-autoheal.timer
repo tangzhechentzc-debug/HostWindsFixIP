@@ -1,0 +1,12 @@
+[Unit]
+Description=每 30 分钟巡检一次节点 IP 是否被封锁
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+# 关机期间错过的任务，开机后补跑
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

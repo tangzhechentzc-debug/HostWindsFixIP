@@ -1,0 +1,13 @@
+[Unit]
+Description=Hostwinds 节点 IP 自动巡检与修复
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/hostwinds-autoheal/hostwinds_autoheal.py
+WorkingDirectory=/root/hostwinds-autoheal
+# 单轮最长 3 小时（max-duration 10800）
+TimeoutStartSec=11000
+StandardOutput=journal
+StandardError=journal
