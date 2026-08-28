@@ -3,11 +3,11 @@
 定时检查 Shadowrocket 节点 IP 是否被墙；被墙则通过 Hostwinds Cloud API 换 IP，
 验证新 IP 干净后更新 `~/sub-gen/ips.txt` 并重新生成订阅。运行在订阅服务器上。
 
-## ⚠️ 权威性：不要再从 Mac 跑 push.sh
+## ⚠️ 注意点：不要再从 本机 跑 push.sh
 
 启用本自动化后，**服务器上的 `~/sub-gen/ips.txt` 是唯一权威**。
 
-Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **Mac 本地的 ips.txt 覆盖到服务器**，
+Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **本地的 ips.txt 覆盖到服务器**，
 从而把自动更新的新 IP 冲掉，订阅会退回旧的死 IP。
 
 需要手动改节点时，直接在服务器上操作：
