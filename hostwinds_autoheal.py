@@ -40,7 +40,7 @@ VERIFY_WINDOW = 600.0
 VERIFY_CONFIRM = 2
 RETRY_COOLDOWN = 30.0
 SUBMIT_RETRIES = 3
-MAX_CYCLES = 5
+MAX_CYCLES = 2
 MAX_DURATION = 10800.0
 HTTP_TIMEOUT = 30.0
 
@@ -401,8 +401,10 @@ def fix_loop(args, key: str, log: Logger, deadline: float) -> tuple[str, str | N
                 break
             log(f"  main_ip 仍为 {current}")
         if not new_ip:
-            log("观察期内 main_ip 未变化，进入下一轮", "WARN")
-            continue
+            # 提交已受理但 IP 始终不变 = Hostwinds 换 IP 冷却/限频。
+            # 继续连刷只会撞在冷却上，直接结束本次运行，靠 timer 稀疏重试。
+            log("提交已受理但 IP 未变化，疑似换 IP 冷却；停止本次运行，等待下次巡检", "WARN")
+            return "cooldown", last_new_ip
 
         last_new_ip = new_ip
         log(f"IP 已变化：{old_ip} → {new_ip}")
@@ -578,6 +580,9 @@ def main(argv=None) -> int:
             return EXIT_API
         if outcome == "ipcheck_error":
             return EXIT_IPCHECK
+        if outcome == "cooldown":
+            log("因换 IP 冷却本次未能取得干净 IP，等待下次 timer 稀疏重试", "WARN")
+            return EXIT_EXHAUSTED
         if outcome in ("exhausted", "unverified"):
             log(f"未能在上限内取得干净 IP；最后 IP={new_ip or target_ip}", "ERROR")
             return EXIT_EXHAUSTED

@@ -244,6 +244,35 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(code, ah.EXIT_EXHAUSTED)
             self.assertEqual(sb.ips.read_text(), before)
 
+    def test_cooldown_no_ip_change_stops_run_without_hammering(self):
+        """提交受理但 IP 始终不变（冷却）→ 本次运行停止，退出码 3，且只提交过一次。"""
+        with Sandbox() as sb:
+            before = sb.ips.read_text()
+            submit_calls = []
+            def counting_submit(key, sid, timeout):
+                submit_calls.append(1)
+                return (True, "Your IP is being changed!")
+            # get_instance 始终返回同一个 IP（模拟冷却：换不动）
+            def fake_instance(key, sid, timeout):
+                return {"main_ip": "198.51.100.20", "status": "ACTIVE"}
+            def fake_run(cmd, **kw):
+                if str(sb.gen) in " ".join(map(str, cmd)):
+                    return completed(0, "节点数: 1")
+                return completed(1, ipcheck_stdout("198.51.100.20", inner=False, outer=True))
+            out = io.StringIO()
+            with (
+                mock.patch.object(ah.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(ah, "get_instance", side_effect=fake_instance),
+                mock.patch.object(ah, "submit_fix", side_effect=counting_submit),
+                mock.patch.object(ah.time, "sleep", lambda *_: None),
+                redirect_stdout(out),
+            ):
+                code = ah.main(sb.argv("--max-cycles", "5"))
+            self.assertEqual(code, ah.EXIT_EXHAUSTED)
+            self.assertIn("疑似换 IP 冷却", out.getvalue())
+            self.assertEqual(len(submit_calls), 1)   # 只刷一次，没有连刷
+            self.assertEqual(sb.ips.read_text(), before)
+
     def test_lock_held_exits_quietly(self):
         with Sandbox() as sb:
             holder = ah.acquire_lock(sb.lock)
