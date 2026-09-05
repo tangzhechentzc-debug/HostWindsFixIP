@@ -265,5 +265,71 @@ class MainFlowTests(unittest.TestCase):
             self.assertNotIn("SECRET-API-KEY-VALUE", sb.log.read_text(encoding="utf-8"))
 
 
+
+class RetryTests(unittest.TestCase):
+    def test_get_instance_retry_recovers_after_transient_error(self):
+        calls = []
+        def flaky(key, sid, timeout):
+            calls.append(1)
+            if len(calls) < 3:
+                raise ah.ApiError("TimeoutError")
+            return {"main_ip": "1.2.3.4"}
+        with (
+            mock.patch.object(ah, "get_instance", side_effect=flaky),
+            mock.patch.object(ah.time, "sleep", lambda *_: None),
+        ):
+            info = ah.get_instance_retry("k", "1", 10, attempts=3, cooldown=0)
+        self.assertEqual(info["main_ip"], "1.2.3.4")
+        self.assertEqual(len(calls), 3)
+
+    def test_get_instance_retry_raises_after_exhausting_attempts(self):
+        with (
+            mock.patch.object(ah, "get_instance", side_effect=ah.ApiError("TimeoutError")),
+            mock.patch.object(ah.time, "sleep", lambda *_: None),
+        ):
+            with self.assertRaises(ah.ApiError):
+                ah.get_instance_retry("k", "1", 10, attempts=3, cooldown=0)
+
+    def test_transient_timeout_midloop_does_not_abort_whole_heal(self):
+        """第 1 轮换到被封 IP；第 2 轮开头读 IP 超时一次后恢复，最终换到干净 IP。"""
+        with Sandbox() as sb:
+            seq = [
+                {"main_ip": "198.51.100.20", "status": "ACTIVE"},
+                {"main_ip": "198.51.100.20"},
+                {"main_ip": "198.51.100.20"}, {"main_ip": "9.9.9.9"},
+                ah.ApiError("TimeoutError"),
+                {"main_ip": "9.9.9.9"},
+                {"main_ip": "9.9.9.9"}, {"main_ip": "8.8.8.8"},
+            ]
+            def fake_instance(key, sid, timeout):
+                item = seq.pop(0)
+                if isinstance(item, Exception):
+                    raise item
+                return item
+            checks = [
+                (1, ipcheck_stdout("198.51.100.20", inner=False, outer=True)),
+                (1, ipcheck_stdout("9.9.9.9", inner=False, outer=True)),
+                (1, ipcheck_stdout("9.9.9.9", inner=False, outer=True)),
+                (0, ipcheck_stdout("8.8.8.8", inner=True, outer=True)),
+            ]
+            def fake_run(cmd, **kw):
+                if str(sb.gen) in " ".join(map(str, cmd)):
+                    return completed(0, "节点数: 1")
+                rc, out = checks.pop(0) if checks else (0, ipcheck_stdout("8.8.8.8", inner=True, outer=True))
+                return completed(rc, out)
+            out = io.StringIO()
+            with (
+                mock.patch.object(ah.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(ah, "get_instance", side_effect=fake_instance),
+                mock.patch.object(ah, "submit_fix", return_value=(True, "Your IP is being changed!")),
+                mock.patch.object(ah.time, "sleep", lambda *_: None),
+                redirect_stdout(out),
+            ):
+                code = ah.main(sb.argv("--verify-confirm", "2", "--submit-retries", "3"))
+            self.assertEqual(code, ah.EXIT_OK)
+            self.assertIn("8.8.8.8", sb.ips.read_text())
+            self.assertIn("读取实例失败", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()

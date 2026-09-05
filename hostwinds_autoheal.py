@@ -137,6 +137,22 @@ def get_instance(key: str, service_id: str, timeout: float) -> dict:
     raise ApiError(f"get_instance 未返回实例数据：{msg or '未知错误'}")
 
 
+def get_instance_retry(key: str, service_id: str, timeout: float,
+                       attempts: int, cooldown: float, log=None) -> dict:
+    """带重试的 get_instance：瞬时错误不应中断整个自愈循环。"""
+    last = None
+    for i in range(1, attempts + 1):
+        try:
+            return get_instance(key, service_id, timeout)
+        except ApiError as exc:
+            last = exc
+            if log:
+                log(f"读取实例失败：{exc}（{i}/{attempts}）", "WARN")
+            if i < attempts:
+                time.sleep(cooldown)
+    raise last if last else ApiError("get_instance 未知失败")
+
+
 def submit_fix(key: str, service_id: str, timeout: float) -> tuple[bool, str]:
     """提交 fix_isp_blocked。返回 (是否受理, 消息)。"""
     parsed = api_call("fix_isp_blocked", key, timeout, serviceid=service_id, loc="ips")
@@ -329,10 +345,13 @@ def fix_loop(args, key: str, log: Logger, deadline: float) -> tuple[str, str | N
         log(f"—— 第 {cycle}/{args.max_cycles} 轮 ——")
 
         try:
-            old_ip = get_instance(key, args.service_id, args.timeout).get("main_ip")
+            old_ip = get_instance_retry(
+                key, args.service_id, args.timeout,
+                args.submit_retries, args.retry_cooldown, log,
+            ).get("main_ip")
         except ApiError as exc:
-            log(f"读取当前 IP 失败：{exc}", "ERROR")
-            return "api_error", last_new_ip
+            log(f"多次重试后仍读不到当前 IP：{exc}，进入下一轮", "WARN")
+            continue
         log(f"提交前 main_ip = {old_ip}")
 
         submitted_at = None
@@ -509,9 +528,12 @@ def main(argv=None) -> int:
             return EXIT_ARGS
 
         try:
-            info = get_instance(key, args.service_id, args.timeout)
+            info = get_instance_retry(
+                key, args.service_id, args.timeout,
+                args.submit_retries, args.retry_cooldown, log,
+            )
         except ApiError as exc:
-            log(f"调用 get_instance 失败：{exc}", "ERROR")
+            log(f"多次重试后仍无法调用 get_instance：{exc}", "ERROR")
             return EXIT_API
         main_ip = info.get("main_ip")
         log(f"Hostwinds main_ip={main_ip} status={info.get('status')}；"
