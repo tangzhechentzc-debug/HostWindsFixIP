@@ -14,6 +14,25 @@ Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **本地的 ips.txt 覆盖到服�
 
     vi ~/sub-gen/ips.txt && ~/sub-gen/gen-sub.sh
 
+## ⚠️ 节点服务栈：可能是 v2ray 而非 Xray
+
+`deploy.sh`/`remote-setup.sh.tmpl` 是按 **Xray** 写的模板，但生产节点也可能是
+**手动部署的 v2ray**，两者路径、服务名完全不同。**不要对已有部署的节点直接重跑
+`remote-setup.sh.tmpl`**，会冲突。
+
+| 项 | Xray（脚本假设） | v2ray（可能的实际部署） |
+| --- | --- | --- |
+| 配置文件 | `/usr/local/etc/xray/config.json` | `/etc/v2ray/config.json` |
+| systemd 服务名 | `xray` | `v2ray` |
+| 二进制 | `/usr/local/bin/xray` | `/usr/bin/v2ray/v2ray` |
+
+- 出站建议配置 `freedom` 协议的 `domainStrategy: "UseIPv4"`，强制代理只走 IPv4 出口。
+  **原因**：部分机房的 IPv6 段容易被目标网站判定异常流量（观测样本：访问 Google/Gemini
+  报 "unusual traffic"，出口地址是 IPv6）；改为仅 IPv4 后未再复现。此为**节点级配置**，
+  每次换新实例都需要重新检查并应用，自动化流程未覆盖此项。
+- 换到新实例时，先用 `ss -tlnp | grep <vmess端口>` 确认监听进程名及其 `-config` 参数
+  指向的真实配置文件，不要假设和上一台一致。
+
 ## 文档
 
 - **[PRD.md](PRD.md)** — 完整产品需求文档：背景、演进复盘、架构、接口契约、判定逻辑、限制
@@ -25,7 +44,7 @@ Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **本地的 ips.txt 覆盖到服�
 | 文件 | 说明 |
 | --- | --- |
 | `hostwinds_autoheal.py` | 编排器主程序 |
-| `test_hostwinds_autoheal.py` | 离线单元测试（22 项） |
+| `test_hostwinds_autoheal.py` | 离线单元测试（30 项） |
 | `ipcheck.py` | 封锁检测（不修改） |
 | `hostwinds.apikey` | Cloud API key，权限 600，已绑定 IP 白名单 |
 | `autoheal.log` | 运行日志 |
@@ -62,12 +81,19 @@ Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **本地的 ips.txt 覆盖到服�
 | 情况 | 判定 | 动作 |
 | --- | --- | --- |
 | 四项全绿（exit 0） | 未封锁 | 无动作 |
-| exit 1，国外至少一项通 | **真被墙** | 换 IP |
+| exit 1，**国内两项均通** | 仅国外探测抖动，非真被墙（v1.3） | 无动作，判为 inconclusive |
+| exit 1，国内确有一项不通，国外至少一项通 | **真被墙** | 换 IP |
 | exit 1，国外两项全红 | VPS 未就绪或宕机 | **不换 IP**，退出码 5 |
 | exit 3 | 检测接口故障，非判决 | 无动作，等下次 |
 
-关键点：换 IP 后 VPS 需约 10–11 分钟才真正可用，期间四项全红。
-若不区分"国外可达"，会把未就绪误判成被墙而反复空刷，因此 `--settle-wait` 默认 900 秒。
+关键点：
+- 换 IP 后 VPS 需约 10–11 分钟才真正可用，期间四项全红。
+  若不区分"国外可达"，会把未就绪误判成被封而反复空刷，因此 `--settle-wait` 默认 900 秒。
+- Hostwinds 换 IP 存在冷却：提交受理但 `main_ip` 在观察窗口内始终未变，
+  判定为冷却，**立即停止本次运行**，交由下次 30 分钟 timer 稀疏重试，
+  因此 `--max-cycles` 默认降为 2（v1.2）。
+- 真封锁判定要求国内确实至少一项不通，仅凭国外可达不足以判定被墙，
+  避免第三方检测接口自身的探测抖动误触发换 IP（v1.3）。
 
 ## 退出码
 
