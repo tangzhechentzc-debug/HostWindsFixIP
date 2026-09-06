@@ -28,6 +28,8 @@ DEFAULT_SERVICE_ID = os.environ.get("HOSTWINDS_SERVICE_ID", "")
 RESULT_FIELDS = ("innerICMP", "innerTCP", "outICMP", "outTCP")
 # 国外可达判据：这两项任一为真 = 机器对外通，exit=1 才是真被墙
 REACHABILITY_FIELDS = ("outICMP", "outTCP")
+# 国内两项须至少一项确实不通，才构成「真被墙」；国内全通只是国外探测抖动。
+INNER_FIELDS = ("innerICMP", "innerTCP")
 # 允许进日志的 get_instance 字段白名单（其余字段含密码等敏感信息）
 SAFE_INSTANCE_FIELDS = ("serviceid", "main_ip", "status", "srvrname", "hostname")
 
@@ -207,6 +209,11 @@ def run_ipcheck(ipcheck: pathlib.Path, ip: str, timeout: float) -> Check:
     if not complete:
         return Check("blocked", 1, results,
                      (warning or "") + "；四项结果不完整，保守判为被墙")
+    inner_all_ok = all(results.get(f) is True for f in INNER_FIELDS)
+    if inner_all_ok:
+        # 国内两项均通：无论国外怎么波动，都不是真被墙，只是探测抖动。
+        return Check("inconclusive", 1, results,
+                     (warning or "") + "；国内两项均通，判为国外探测抖动，不计入封锁判定")
     if any(results.get(f) is True for f in REACHABILITY_FIELDS):
         return Check("blocked", 1, results, warning)
     return Check("not_ready", 1, results, warning)

@@ -115,6 +115,34 @@ class ClassifyTests(unittest.TestCase):
             self.assertEqual(ah.run_ipcheck(sb.ipcheck, "1.2.3.4", 10).kind, "inconclusive")
 
 
+    def test_inner_all_true_with_flaky_outer_is_noise_not_blocked(self):
+        """国内两项均通，仅国外某项抖动为 False：不应判定为真被墙。"""
+        stdout = json.dumps([{
+            "ip": "1.2.3.4", "blocked": True,
+            "results": {"innerICMP": True, "innerTCP": True,
+                        "outICMP": False, "outTCP": True},
+            "error": None,
+        }])
+        c = self.run_check(1, stdout)
+        self.assertEqual(c.kind, "inconclusive")
+        self.assertIn("探测抖动", c.warning)
+
+    def test_inner_all_true_both_outer_false_is_still_noise(self):
+        """国内两项均通，即使国外两项都碰巧为 False，也不算真被墙。"""
+        stdout = json.dumps([{
+            "ip": "1.2.3.4", "blocked": True,
+            "results": {"innerICMP": True, "innerTCP": True,
+                        "outICMP": False, "outTCP": False},
+            "error": None,
+        }])
+        c = self.run_check(1, stdout)
+        self.assertEqual(c.kind, "inconclusive")
+
+    def test_inner_partial_failure_with_outer_reachable_is_real_block(self):
+        """国内确有一项不通，国外可达：维持原有的真被墙判定。"""
+        c = self.run_check(1, ipcheck_stdout("1.2.3.4", inner=False, outer=True))
+        self.assertEqual(c.kind, "blocked")
+
 class ApiTests(unittest.TestCase):
     def test_submit_fix_success_and_error_and_invalid_action(self):
         cases = [
@@ -271,6 +299,20 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(code, ah.EXIT_EXHAUSTED)
             self.assertIn("疑似换 IP 冷却", out.getvalue())
             self.assertEqual(len(submit_calls), 1)   # 只刷一次，没有连刷
+            self.assertEqual(sb.ips.read_text(), before)
+
+    def test_noise_at_main_check_does_not_trigger_ip_change(self):
+        with Sandbox() as sb:
+            before = sb.ips.read_text()
+            noisy = json.dumps([{
+                "ip": "198.51.100.20", "blocked": True,
+                "results": {"innerICMP": True, "innerTCP": True,
+                            "outICMP": False, "outTCP": True},
+                "error": None,
+            }])
+            code, out = self.run_main(sb, ipcheck_seq=[(1, noisy)])
+            self.assertEqual(code, ah.EXIT_OK)
+            self.assertIn("无结论", out)
             self.assertEqual(sb.ips.read_text(), before)
 
     def test_lock_held_exits_quietly(self):
