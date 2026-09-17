@@ -26,12 +26,23 @@ Mac 上的 `~/shadowrocket-sub/push.sh` 会把 **本地的 ips.txt 覆盖到服�
 | systemd 服务名 | `xray` | `v2ray` |
 | 二进制 | `/usr/local/bin/xray` | `/usr/bin/v2ray/v2ray` |
 
-- 出站建议配置 `freedom` 协议的 `domainStrategy: "UseIPv4"`，强制代理只走 IPv4 出口。
+- 该节点 SSH 访问：凭据（root 密码或私钥）随每次新建实例而变，以 Hostwinds 面板为准；
+  `<main_ip>` 从 Cloud API `get_instance` 或 `~/sub-gen/ips.txt` 读取，换 IP 后会变。
+  **务必从订阅服务器中转 SSH（如 `sshpass -p <密码> ssh root@<main_ip>`），不要直接从
+  本地终端连接**——本机代理/VPN 可能接管出站 TCP 甚至 DNS 解析（曾把随便一个域名解析
+  成 198.18.0.0/15 假 IP 段），直连结果不可信，也存在连错目标的风险。
+- 出站需配置 `freedom` 协议的 `domainStrategy: "UseIPv4"`，强制代理只走 IPv4 出口。
   **原因**：部分机房的 IPv6 段容易被目标网站判定异常流量（观测样本：访问 Google/Gemini
-  报 "unusual traffic"，出口地址是 IPv6）；改为仅 IPv4 后未再复现。此为**节点级配置**，
-  每次换新实例都需要重新检查并应用，自动化流程未覆盖此项。
+  报 "unusual traffic"，出口地址是 IPv6）；改为仅 IPv4 后未再复现。**这是节点级配置，
+  每次换新实例都不会自动继承**，v1.4、v1.5 各自单独配置过一次。改动前备份配置文件；
+  生效需 `systemctl restart v2ray`。
 - 换到新实例时，先用 `ss -tlnp | grep <vmess端口>` 确认监听进程名及其 `-config` 参数
   指向的真实配置文件，不要假设和上一台一致。
+- **API key 与实例可能不同步**：v1.5 曾发生服务器上存的 `hostwinds.apikey` 与 Hostwinds
+  面板 `api_keys.php` 当前显示的 key 值不一致，导致 `get_instance`/`get_instances`
+  对所有 serviceid 均报 "A valid serviceid is required"（`get_locations` 等通用只读
+  接口不受影响，容易误判为"该 serviceid 不存在"而不是"key 错了"）。换实例或出现同类
+  报错时，先去面板核对 key 值是否和服务器上的一致。
 
 ## 文档
 

@@ -2,9 +2,9 @@
 
 | 项 | 值 |
 | --- | --- |
-| 版本 | 1.4（已上线） |
-| 当前节点 | serviceid 占位 7654321 · 198.51.100.40 · v2ray（非 Xray，见 §6.5） |
-| 日期 | 2026-08-27 |
+| 版本 | 1.5（已上线） |
+| 当前节点 | serviceid 占位 7654322 · 198.51.100.41 · v2ray（非 Xray，见 §6.5） |
+| 日期 | 2026-09-17 |
 | 状态 | 生产运行中（systemd timer 已启用） |
 | 运行环境 | 订阅服务器 203.0.113.10 · Ubuntu · Python 3.12.3 |
 
@@ -305,6 +305,25 @@ tail -f ~/hostwinds-autoheal/autoheal.log
 按日志统计封锁频率以优化巡检间隔。
 
 ## 14. 变更记录
+
+### v1.5（2026-09-17）
+- **节点迁移**：原实例（占位 serviceid 7654321）从 Cloud API 视角消失——`get_instances`
+  返回空列表，`get_instance` 报 "A valid serviceid is required"，判定该实例已失效
+  （与 v1.4 迁移前症状一致：换 IP 长时间冷却不再变化）。用户已手动创建替代实例：
+  占位 serviceid 7654322，198.51.100.41，Debian 12。
+- **根因排查**：新旧实例均报同一错误，且 `get_instances`/`get_instance_ids` 全为空，
+  但 `get_locations`（通用只读接口）正常，说明 key 本身认证通过、只是查不到任何实例。
+  对比 Hostwinds 面板 `api_keys.php` 实际显示的 key 值，发现与服务器上
+  `hostwinds.apikey` 存的值**不一致**（推测账号侧之后重新生成过 key 未同步）。用面板
+  最新值覆盖后，`get_instances` 立即恢复正常。
+- **修复**：`DEFAULT_SERVICE_ID`（或 `HOSTWINDS_SERVICE_ID` 环境变量）更新为新
+  serviceid；`ips.txt` 按实际部署更正端口/UUID（新实例是全新部署，未沿用上一台的
+  端口/UUID，避免重蹈 v1.4 曾踩过的"照抄默认占位值"的坑）。
+- **加固**：新实例的 v2ray outbounds `domainStrategy` 重新确认为 `UseIP`（默认值，
+  未继承 v1.4 的修复），按 §6.5 手动改回 `UseIPv4` 并重启服务；改动前备份配置文件。
+- 验证方式：serviceid/main_ip 一致性经 API 交叉核对；端口可达性与 GFW 检测均从订阅
+  服务器发起（本地终端网络探测/DNS 解析均被本机代理接管、不可信，DNS 查询甚至会
+  返回 198.18.0.0/15 假 IP 段，此坑记入 §6.5 一并提醒）。
 
 ### v1.4（2026-09-06）
 - **节点迁移**：旧实例换 IP 卡在同一 IP 长时间不再变化（远超正常冷却时长），判定为
